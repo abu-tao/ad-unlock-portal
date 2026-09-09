@@ -1,0 +1,11 @@
+# 构建上下文排除项：减小镜像体积、避免泄露敏感配置
+.venv
+logs
+__pycache__
+*.pyc
+.env
+.git
+.gitignore
+test_api.py
+README.md
+start.bat

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理登录 - AD 域账户自助解锁平台</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --bg-top: #0f172a;
+    --bg-bottom: #1e3a8a;
+    --text: #1f2937;
+    --text-light: #6b7280;
+    --border: #e5e7eb;
+    --danger: #dc2626;
+    --danger-bg: #fef2f2;
+  }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, var(--bg-top), var(--bg-bottom));
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 400px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+    padding: 36px 32px 28px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .brand-icon {
+    width: 44px; height: 44px; flex: 0 0 44px;
+    background: var(--primary); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brand h1 { font-size: 19px; color: var(--text); }
+  .brand p { font-size: 13px; color: var(--text-light); margin-top: 2px; }
+
+  label { display: block; font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+  input[type="password"] {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 15px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input[type="password"]:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, .15);
+  }
+  button {
+    width: 100%;
+    margin-top: 20px;
+    padding: 13px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--primary);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  button:hover { background: var(--primary-dark); }
+  button:disabled { background: #93c5fd; cursor: not-allowed; }
+
+  .msg {
+    display: none;
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    background: var(--danger-bg);
+    color: var(--danger);
+    border: 1px solid #fecaca;
+    line-height: 1.6;
+  }
+  .msg.show { display: block; }
+  .back { display: block; text-align: center; margin-top: 18px; font-size: 13px; color: var(--text-light); text-decoration: none; }
+  .back:hover { color: var(--primary); }
+</style>
+</head>
+<body>
+
+<main class="card">
+  <div class="brand">
+    <div class="brand-icon">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+      </svg>
+    </div>
+    <div>
+      <h1>管理登录</h1>
+      <p>解锁记录查询 · 仅限 IT 管理员</p>
+    </div>
+  </div>
+
+  {% if enabled %}
+  <form id="loginForm" autocomplete="off">
+    <label for="password">管理密码</label>
+    <input type="password" id="password" name="password" placeholder="请输入管理密码" required autofocus>
+    <button type="submit" id="btnLogin">登 录</button>
+  </form>
+  <div id="msg" class="msg" role="alert"></div>
+  {% else %}
+  <div class="msg show">管理功能未启用：请在服务器 .env 中配置 <b>ADMIN_PASSWORD</b> 后重启服务。</div>
+  {% endif %}
+
+  <a class="back" href="/">&larr; 返回解锁页面</a>
+</main>
+
+{% if enabled %}
+<script>
+(function () {
+  var form = document.getElementById('loginForm');
+  var input = document.getElementById('password');
+  var btn = document.getElementById('btnLogin');
+  var msg = document.getElementById('msg');
+
+  function showMsg(text) {
+    msg.textContent = text;
+    msg.classList.add('show');
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var password = input.value;
+    if (!password) { showMsg('请输入管理密码'); return; }
+
+    btn.disabled = true;
+    btn.textContent = '登录中…';
+    msg.classList.remove('show');
+
+    fetch('/admin/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify({ password: password })
+    })
+      .then(function (resp) { return resp.json().then(function (d) { return { data: d, status: resp.status }; }); })
+      .then(function (r) {
+        if (r.data.success) {
+          window.location.href = r.data.redirect || '/admin';
+        } else {
+          showMsg(r.data.message || '登录失败');
+        }
+      })
+      .catch(function () { showMsg('网络异常，请稍后重试'); })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = '登 录';
+      });
+  });
+})();
+</script>
+{% endif %}
+</body>
+</html>

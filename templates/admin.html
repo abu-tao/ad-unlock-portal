@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>解锁记录查询 - AD 域账户自助解锁平台</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --bg-top: #0f172a;
+    --bg-bottom: #1e3a8a;
+    --text: #1f2937;
+    --text-light: #6b7280;
+    --border: #e5e7eb;
+    --bg-soft: #f8fafc;
+  }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: #f1f5f9;
+    min-height: 100vh;
+    color: var(--text);
+  }
+
+  .topbar {
+    background: linear-gradient(135deg, var(--bg-top), var(--bg-bottom));
+    color: #fff;
+    padding: 18px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-icon {
+    width: 40px; height: 40px; flex: 0 0 40px;
+    background: rgba(255, 255, 255, .15); border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .topbar h1 { font-size: 18px; }
+  .topbar .sub { font-size: 12px; opacity: .75; margin-top: 2px; }
+  .topbar .actions { display: flex; gap: 10px; }
+  .topbar a {
+    color: #fff; text-decoration: none; font-size: 13px;
+    padding: 8px 14px; border-radius: 8px;
+    background: rgba(255, 255, 255, .12);
+    transition: background .15s;
+  }
+  .topbar a:hover { background: rgba(255, 255, 255, .25); }
+
+  .container { max-width: 1200px; margin: 24px auto; padding: 0 20px; }
+
+  .card { background: #fff; border-radius: 14px; box-shadow: 0 4px 16px rgba(15, 23, 42, .06); padding: 22px; }
+
+  .filter { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  .filter .field { display: flex; flex-direction: column; gap: 6px; }
+  .filter label { font-size: 12px; font-weight: 600; color: var(--text-light); }
+  .filter input, .filter select {
+    padding: 8px 10px; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 8px; outline: none;
+    background: #fff; min-width: 130px;
+  }
+  .filter input:focus, .filter select:focus { border-color: var(--primary); }
+  .filter button {
+    padding: 9px 22px; font-size: 13px; font-weight: 600;
+    color: #fff; background: var(--primary); border: none; border-radius: 8px; cursor: pointer;
+  }
+  .filter button:hover { background: var(--primary-dark); }
+  .filter button.ghost { background: #fff; color: var(--text); border: 1px solid var(--border); }
+  .filter button.ghost:hover { border-color: var(--primary); color: var(--primary); }
+
+  .summary { margin: 16px 2px 8px; font-size: 13px; color: var(--text-light); }
+  .summary b { color: var(--text); }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left; padding: 10px 12px; font-weight: 600;
+    color: var(--text-light); border-bottom: 2px solid var(--border);
+    white-space: nowrap; background: var(--bg-soft);
+  }
+  tbody td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr:hover { background: var(--bg-soft); }
+  .mono { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+  .msg-cell { max-width: 360px; }
+  .msg-cell span {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; line-height: 1.5;
+  }
+
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: 12px; white-space: nowrap;
+  }
+  .badge.ok   { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+  .badge.info { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+  .badge.warn { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+  .badge.err  { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+  .pill-ok   { color: #059669; font-weight: 600; }
+  .pill-fail { color: #dc2626; font-weight: 600; }
+
+  .pager { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; flex-wrap: wrap; gap: 10px; }
+  .pager .info { font-size: 13px; color: var(--text-light); }
+  .pager .btns { display: flex; gap: 8px; }
+  .pager button {
+    padding: 7px 16px; font-size: 13px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: #fff; color: var(--text);
+  }
+  .pager button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+  .pager button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .empty { text-align: center; padding: 40px 0; color: var(--text-light); font-size: 14px; }
+  .loading { text-align: center; padding: 40px 0; color: var(--text-light); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="9" y1="13" x2="15" y2="13"></line>
+        <line x1="9" y1="17" x2="13" y2="17"></line>
+      </svg>
+    </div>
+    <div>
+      <h1>解锁记录查询</h1>
+      <div class="sub">AD 域账户自助解锁平台 · 管理端</div>
+    </div>
+  </div>
+  <div class="actions">
+    <a href="/">返回解锁页面</a>
+    <a href="/admin/logout">退出登录</a>
+  </div>
+</header>
+
+<main class="container">
+  <section class="card">
+    <div class="filter">
+      <div class="field">
+        <label for="fEmployeeId">工号 / 登录名（模糊）</label>
+        <input type="text" id="fEmployeeId" placeholder="如 1001 或 zhang" maxlength="40">
+      </div>
+      <div class="field">
+        <label for="fCode">结果</label>
+        <select id="fCode">
+          <option value="">全部</option>
+          {% for code, label in code_labels.items() %}
+          <option value="{{ code }}">{{ label }}（{{ code }}）</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="fDateFrom">开始日期</label>
+        <input type="date" id="fDateFrom">
+      </div>
+      <div class="field">
+        <label for="fDateTo">结束日期</label>
+        <input type="date" id="fDateTo">
+      </div>
+      <button id="btnSearch" type="button">查 询</button>
+      <button id="btnReset" class="ghost" type="button">重 置</button>
+    </div>
+  </section>
+
+  <div class="summary">共 <b id="totalCount">0</b> 条记录</div>
+
+  <section class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>工号</th>
+            <th>结果</th>
+            <th>结果码</th>
+            <th>返回消息</th>
+            <th>来源 IP</th>
+            <th>耗时</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="7" class="loading">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <div class="info" id="pageInfo"></div>
+      <div class="btns">
+        <button id="btnPrev" type="button">&larr; 上一页</button>
+        <button id="btnNext" type="button">下一页 &rarr;</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var CODE_LABELS = {{ code_labels | tojson }};
+  // 结果码 -> 徽章颜色分组
+  var KIND = {
+    UNLOCKED: 'ok',
+    NOT_LOCKED: 'info',
+    NOT_FOUND: 'warn', DISABLED: 'warn', MULTIPLE_MATCH: 'warn', BAD_INPUT: 'warn',
+    FORBIDDEN: 'err', RATE_LIMITED: 'err', AD_NOT_CONFIGURED: 'err',
+    AD_BIND_FAILED: 'err', AD_CONNECT_FAILED: 'err', AD_ERROR: 'err', INTERNAL: 'err'
+  };
+
+  var state = { page: 1, page_size: 20, employee_id: '', code: '', date_from: '', date_to: '' };
+
+  var tbody = document.getElementById('tbody');
+  var btnSearch = document.getElementById('btnSearch');
+  var btnReset = document.getElementById('btnReset');
+  var btnPrev = document.getElementById('btnPrev');
+  var btnNext = document.getElementById('btnNext');
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function load() {
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">加载中…</td></tr>';
+    var params = new URLSearchParams({
+      page: state.page,
+      page_size: state.page_size,
+      employee_id: state.employee_id,
+      code: state.code,
+      date_from: state.date_from,
+      date_to: state.date_to
+    });
+
+    fetch('/api/admin/records?' + params.toString(), {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+      .then(function (resp) { return resp.json(); })
+      .then(function (data) {
+        if (!data.success) { throw new Error(data.message || '查询失败'); }
+        render(data);
+      })
+      .catch(function (err) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">查询失败：' + esc(err.message) + '</td></tr>';
+      });
+  }
+
+  function render(data) {
+    document.getElementById('totalCount').textContent = data.total;
+    document.getElementById('pageInfo').textContent =
+      '第 ' + data.page + ' / ' + (data.pages || 1) + ' 页';
+
+    if (!data.records.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无符合条件的记录</td></tr>';
+      btnPrev.disabled = true;
+      btnNext.disabled = true;
+      return;
+    }
+
+    var html = '';
+    data.records.forEach(function (r) {
+      var kind = KIND[r.code] || 'err';
+      var label = CODE_LABELS[r.code] || r.code;
+      var success = r.success ? '<span class="pill-ok">成功</span>' : '<span class="pill-fail">失败</span>';
+      html += '<tr>'
+        + '<td class="mono">' + esc(r.ts) + '</td>'
+        + '<td class="mono">' + esc(r.employee_id) + '</td>'
+        + '<td>' + success + '</td>'
+        + '<td><span class="badge ' + kind + '">' + esc(label) + '</span></td>'
+        + '<td class="msg-cell"><span title="' + esc(r.message) + '">' + esc(r.message) + '</span></td>'
+        + '<td class="mono">' + esc(r.ip) + '</td>'
+        + '<td class="mono">' + (r.cost_ms != null ? r.cost_ms + ' ms' : '-') + '</td>'
+        + '</tr>';
+    });
+    tbody.innerHTML = html;
+
+    btnPrev.disabled = data.page <= 1;
+    btnNext.disabled = data.page >= data.pages;
+  }
+
+  btnSearch.addEventListener('click', function () {
+    state.employee_id = document.getElementById('fEmployeeId').value.trim();
+    state.code = document.getElementById('fCode').value;
+    state.date_from = document.getElementById('fDateFrom').value;
+    state.date_to = document.getElementById('fDateTo').value;
+    state.page = 1;
+    load();
+  });
+
+  btnReset.addEventListener('click', function () {
+    document.getElementById('fEmployeeId').value = '';
+    document.getElementById('fCode').value = '';
+    document.getElementById('fDateFrom').value = '';
+    document.getElementById('fDateTo').value = '';
+    state = { page: 1, page_size: 20, employee_id: '', code: '', date_from: '', date_to: '' };
+    load();
+  });
+
+  btnPrev.addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
+  btnNext.addEventListener('click', function () { state.page++; load(); });
+
+  // 回车触发表单查询
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') { btnSearch.click(); }
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

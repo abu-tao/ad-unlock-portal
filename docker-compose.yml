@@ -1,0 +1,60 @@
+# ============================================================
+# AD 域控自助解锁平台 - Docker Compose
+#
+# 使用方式（Linux 服务器）：
+#   1. cp .env.example .env   # 填写真实配置
+#   2. docker compose up -d --build
+#   3. 访问 http://<服务器IP>:5000
+#
+# 说明：
+#   - 本文件自动读取同目录 .env 做变量插值
+#   - 应用配置全部通过 environment 注入（镜像内不包含 .env）
+#   - 审计日志挂载到宿主机 ./logs，重启不丢失
+#   - 仅建议在内网使用；如需公网访问请在前方加 HTTPS 反向代理
+# ============================================================
+
+services:
+  ad-unlock-portal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ad-unlock-portal:latest
+    container_name: ad-unlock-portal
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      # ---- AD / LDAP（必填）----
+      AD_SERVER: "${AD_SERVER:?请在 .env 中设置 AD_SERVER（建议 ldaps://）}"
+      AD_DOMAIN: "${AD_DOMAIN:?请在 .env 中设置 AD_DOMAIN}"
+      AD_BIND_USER: "${AD_BIND_USER:?请在 .env 中设置 AD_BIND_USER（完整 DN）}"
+      AD_ADMIN_USER: "${AD_ADMIN_USER:-svc_adunlock}"
+      AD_ADMIN_PASSWORD: "${AD_ADMIN_PASSWORD:?请在 .env 中设置 AD_ADMIN_PASSWORD}"
+      AD_SEARCH_BASE: "${AD_SEARCH_BASE:?请在 .env 中设置 AD_SEARCH_BASE}"
+      AD_USER_ID_ATTR: "${AD_USER_ID_ATTR:-employeeID}"
+      AD_LOCKOUT_WINDOW_MINUTES: "${AD_LOCKOUT_WINDOW_MINUTES:-60}"
+      AD_CONNECT_TIMEOUT: "${AD_CONNECT_TIMEOUT:-5}"
+      AD_RECEIVE_TIMEOUT: "${AD_RECEIVE_TIMEOUT:-10}"
+      # ---- 输入校验 / 安全 ----
+      # 注意：单引号避免 YAML 处理反斜杠；$$ 为 compose 转义的字面 $
+      WORKER_ID_PATTERN: '${WORKER_ID_PATTERN:-^[A-Za-z0-9_\-\.]{3,40}$$}'
+      RATE_LIMIT_MAX: "${RATE_LIMIT_MAX:-10}"
+      RATE_LIMIT_WINDOW_SECONDS: "${RATE_LIMIT_WINDOW_SECONDS:-60}"
+      TRUST_PROXY: "${TRUST_PROXY:-false}"
+      # ---- 管理页面（必填）----
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}"
+      APP_SECRET_KEY: "${APP_SECRET_KEY:-}"
+      ADMIN_SESSION_HOURS: "${ADMIN_SESSION_HOURS:-8}"
+      # ---- 运行时 ----
+      HOST: "0.0.0.0"
+      PORT: "5000"
+      DEBUG: "false"
+      TZ: "${TZ:-CST-8}"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
