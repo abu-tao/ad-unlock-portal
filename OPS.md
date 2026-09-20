@@ -92,6 +92,7 @@
 ├── nginx/
 │   ├── nginx.conf         # 遗留的 nginx 配置（当前未使用，可忽略）
 │   └── certs/             # 自签证书 server.crt / server.key
+├── deps/sp/               # 离线依赖目录（docker cp 导出的 site-packages）
 └── logs/
     ├── app.log            # 应用运行日志
     └── audit.jsonl        # 解锁审计记录（管理页数据源）
@@ -116,6 +117,7 @@
 | `AD_CONNECT_TIMEOUT` / `AD_RECEIVE_TIMEOUT` | `5` / `10` | LDAP 连接/读取超时（秒） |
 | `WORKER_ID_PATTERN` | `^[A-Za-z0-9_\-\.]{3,40}$` | 工号格式白名单 |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_SECONDS` | `10` / `60` | 单 IP 60 秒内最多 10 次 |
+| `ACCOUNT_RATE_LIMIT_MAX` / `ACCOUNT_RATE_LIMIT_WINDOW_SECONDS` | `10` / `3600` | 账户级限流：同一工号 1 小时内最多成功解锁 10 次（方案 B，仅统计解锁成功） |
 | `TRUST_PROXY` | `true` | 信任反代 X-Forwarded-For（有 proxy 容器，必须 true） |
 | `ADMIN_PASSWORD` | （存于 .env） | 管理页登录密码 |
 | `APP_SECRET_KEY` | （存于 .env） | Flask session 密钥，建议 `openssl rand -hex 32` 生成 |
@@ -185,6 +187,8 @@ docker-compose up -d --build ad-unlock-portal
 curl -s http://10.0.10.64/healthz
 ```
 
+> 注意：本服务器无法访问 Docker Hub / PyPI，应用镜像采用**离线构建**（基础镜像 `python:3.11-slim` 本地已有 + `deps/sp/` 依赖目录）。若 `deps/sp/` 缺失，需先从运行容器导出：`docker cp ad-unlock-portal:/usr/local/lib/python3.12/site-packages /opt/ad-unlock-portal/deps/sp` 并删除 3.12 编译扩展（`.so`）后重建。
+
 ---
 
 ## 6. 解锁工作原理
@@ -196,9 +200,11 @@ curl -s http://10.0.10.64/healthz
   → 限流检查（IP 维度，60s/10 次）
   → CSRF 检查（必须携带 X-Requested-With 头）
   → 工号格式白名单校验
+  → 账户级限流检查（方案 B：同一工号 1 小时内成功解锁是否已达 10 次，超限返回 429）
   → LDAP 绑定（svc_adunlock）→ 搜索用户（sAMAccountName 精确匹配）
   → 读取 lockoutTime / badPwdCount / userAccountControl
   → 判断是否锁定 → 锁定则清除 lockoutTime 并重置 badPwdCount
+  → 解锁成功则计入账户限流窗口
   → 写审计日志 → 返回 JSON 结果
 ```
 
@@ -218,7 +224,7 @@ curl -s http://10.0.10.64/healthz
 | `DISABLED` | 账户被禁用 | 联系 IT 服务台 |
 | `MULTIPLE_MATCH` | 工号对应多个账户 | 联系 IT 管理员 |
 | `BAD_INPUT` | 格式不合法 | 核对后重输 |
-| `RATE_LIMITED` | 触发限流 | 稍后再试 |
+| `RATE_LIMITED` | 触发限流 | 稍后再试（账户级提示：1 小时内最多解锁 N 次） |
 | `FORBIDDEN` | 非法请求（缺自定义头） | 非法请求 |
 | `AD_BIND_FAILED` / `AD_CONNECT_FAILED` / `AD_ERROR` | AD 侧异常 | 联系 IT 管理员 |
 | `INTERNAL` | 未预期异常 | 联系 IT 管理员 |
@@ -230,6 +236,7 @@ curl -s http://10.0.10.64/healthz
 | 机制 | 实现 |
 |---|---|
 | 限流 | 单 IP 60 秒内 10 次（无效请求也计数，防绕过） |
+| 账户级限流 | 同一工号 1 小时内最多成功解锁 10 次（滑动窗口，仅解锁成功才计数，超限返回 429） |
 | CSRF 防护 | 要求 `X-Requested-With: XMLHttpRequest` 头（跨站表单无法伪造） |
 | 输入白名单 | 工号正则校验（3-40 位字母数字 `_-.`） |
 | 审计留痕 | 每次操作写入 `audit.jsonl`（IP / 工号 / 结果 / 耗时） |
@@ -265,7 +272,7 @@ tar czf /opt/backup/ad-unlock-portal-$(date +%F).tar.gz -C /opt/backup ad-unlock
 
 1. 在新机器安装 Docker + docker-compose（独立版）
 2. 从 GitHub clone 仓库（`git clone https://github.com/abu-tao/ad-unlock-portal.git`）
-3. 恢复 `.env`（改服务器 IP 相关项）、`logs/`、`nginx/certs/`
+3. 恢复 `.env`（改服务器 IP 相关项）、`logs/`、`nginx/certs/`、`deps/sp/`
 4. `docker-compose up -d` 启动
 5. 开放防火墙端口：`firewall-cmd --permanent --add-port=80/tcp --add-port=443/tcp && firewall-cmd --reload`
 
@@ -342,7 +349,13 @@ docker-compose up -d --build ad-unlock-portal
 
 ### 10.7 拉取镜像失败（Docker Hub 不可达）
 
-本机已配置 daocloud 加速器（`/etc/docker/daemon.json`），且 proxy 用的是本地已有镜像，一般无需新拉取。若需新镜像仍失败，改用 `docker.m.daocloud.io/library/<name>` 完整路径。
+本机已配置 daocloud 加速器（`/etc/docker/daemon.json`），但服务器公网不可达（DNS 解析失败）。应用镜像使用**离线构建**（见 5.5 注意），proxy 用的是本地已有镜像，一般无需新拉取。
+
+### 10.8 账户解锁提示「次数过多」（429）
+
+- 触发条件：同一工号 1 小时内成功解锁达到 10 次（方案 B，仅统计解锁成功）。
+- 说明：滑动窗口，1 小时窗口内成功次数回落前无法再次解锁该账户。
+- 调整阈值：修改 `.env` 的 `ACCOUNT_RATE_LIMIT_MAX` / `ACCOUNT_RATE_LIMIT_WINDOW_SECONDS` 后重建容器。
 
 ---
 
@@ -388,3 +401,4 @@ curl -s http://127.0.0.1:5000/healthz && echo OK
 | 2026-09-17 | 增加反代 | 新增 ad-unlock-proxy（80 http + 443 https 自签），实现不带端口直接访问 |
 | 2026-09-17 | 首页文案 | 标签统一为「工号」，去掉「/ 登录名」 |
 | 2026-09-20 | 本文档 | 运维文档 v1.0 |
+| 2026-09-20 | 账户级限流 | 新增同一工号 1 小时内最多成功解锁 10 次（方案 B）；Dockerfile 改离线构建（3.11-slim + 本地导出依赖） |
