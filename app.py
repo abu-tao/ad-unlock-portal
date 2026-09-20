@@ -109,6 +109,35 @@ def _is_rate_limited(ip: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# 账户级滑动窗口限流（方案 B：只统计「成功解锁」次数）
+#   同一工号在 ACCOUNT_RATE_LIMIT_WINDOW_SECONDS 内成功解锁达到
+#   ACCOUNT_RATE_LIMIT_MAX 次后，后续解锁请求直接返回 429。
+# ---------------------------------------------------------------------------
+_account_hits = defaultdict(deque)
+_account_lock = threading.Lock()
+
+
+def _account_is_rate_limited(employee_id: str) -> bool:
+    """检查工号是否已达窗口内成功解锁上限（不计数，仅检查）。"""
+    now = time.time()
+    with _account_lock:
+        dq = _account_hits[employee_id]
+        while dq and now - dq[0] > config.ACCOUNT_RATE_LIMIT_WINDOW_SECONDS:
+            dq.popleft()
+        return len(dq) >= config.ACCOUNT_RATE_LIMIT_MAX
+
+
+def _account_record_success(employee_id: str) -> None:
+    """记录一次成功解锁（在解锁成功后调用）。"""
+    now = time.time()
+    with _account_lock:
+        dq = _account_hits[employee_id]
+        while dq and now - dq[0] > config.ACCOUNT_RATE_LIMIT_WINDOW_SECONDS:
+            dq.popleft()
+        dq.append(now)
+
+
+# ---------------------------------------------------------------------------
 # 审计日志（JSON Lines）
 # ---------------------------------------------------------------------------
 def _audit(ip: str, employee_id: str, result: dict, extra: dict = None):
@@ -288,6 +317,14 @@ def api_unlock():
         return jsonify({"success": False, "code": "BAD_INPUT",
                         "message": "工号格式不正确，请核对后重新输入", "details": {}}), 400
 
+    # 账户级限流（方案 B）：格式校验后、执行解锁前检查。
+    # 只统计成功解锁次数，因此未锁定 / 未找到 / 被禁用等结果不占额度。
+    if config.ACCOUNT_RATE_LIMIT_MAX > 0 and _account_is_rate_limited(employee_id):
+        logger.warning("账户触发限流 employee_id=%s ip=%s", employee_id, client_ip)
+        return jsonify({"success": False, "code": "RATE_LIMITED",
+                        "message": "该账户短时间内解锁次数过多，请稍后再试（1 小时内最多解锁 %d 次）"
+                                   % config.ACCOUNT_RATE_LIMIT_MAX, "details": {}}), 429
+
     start = time.time()
     try:
         result = ad_unlock.unlock_account(employee_id)
@@ -296,6 +333,9 @@ def api_unlock():
         result = {"success": False, "code": "INTERNAL",
                   "message": "服务异常，请联系 IT 管理员", "details": {}}
     result.setdefault("details", {})
+    # 方案 B：仅当本次解锁成功才计入账户限流
+    if result.get("code") == ad_unlock.UNLOCKED:
+        _account_record_success(employee_id)
     _audit(client_ip, employee_id, result, extra={"cost_ms": int((time.time() - start) * 1000)})
     return jsonify(result), 200
 
