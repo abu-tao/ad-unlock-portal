@@ -57,6 +57,10 @@ WORKER_ID_PATTERN = os.getenv("WORKER_ID_PATTERN", r"^[A-Za-z0-9_\-\.]{3,40}$")
 RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "10"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 
+# 账户级限流：同一工号在窗口内「成功解锁」的最大次数（方案 B：只统计解锁成功）
+ACCOUNT_RATE_LIMIT_MAX = int(os.getenv("ACCOUNT_RATE_LIMIT_MAX", "10"))
+ACCOUNT_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("ACCOUNT_RATE_LIMIT_WINDOW_SECONDS", "3600"))
+
 # 是否信任反向代理（nginx/IIS ARR）传递的 X-Forwarded-For，用于取真实客户端 IP
 TRUST_PROXY = os.getenv("TRUST_PROXY", "false").lower() == "true"
 
